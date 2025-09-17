@@ -37,7 +37,7 @@ Features:
 * save high-resolution image
 * works even with a large number of photos (> 100)
 * integrates into the GNOME environment
-* available in English, French, German, Czech and Italian
+* available in English, French, German, Czech, Italian, Bulgarian, Dutch, Russian, Spanish, Polish and Ukrainian
 
 Installation
 ------------
@@ -52,13 +52,6 @@ Installation
 
   .. code:: bash
 
-   sudo apt-get install photocollage
-
-* Older Ubuntu:
-
-  .. code:: bash
-
-   sudo add-apt-repository ppa:dhor/myway && sudo apt-get update
    sudo apt-get install photocollage
 
 * Using pip, the Python package manager:
@@ -81,7 +74,13 @@ If it doesn't, just run the command:
 Hacking
 -------
 
-* If you need to install from source:
+* If you changed the source and want to test your modifications, run:
+
+  .. code:: bash
+
+   python -c 'from photocollage import gtkgui; gtkgui.main()'
+
+* If you need to build a package from source and install it:
 
   .. code:: bash
 
@@ -91,12 +90,12 @@ Hacking
    sudo pacman -S python-pillow python-gobject
 
    # Install PhotoCollage
-   python3 setup.py sdist
-   pip3 install --user --upgrade dist/photocollage-*.tar.gz
+   python -m build
+   pip install --user --upgrade dist/photocollage-*.tar.gz
 
 * If you wish to contribute, please lint your code and pass tests:
 
   .. code:: bash
 
    flake8 .
-   nosetests-3.4
+   python -m unittest tests/test_*.py

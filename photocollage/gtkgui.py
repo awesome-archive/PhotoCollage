@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (C) 2013 Adrien Vergé
 #
 # This program is free software; you can redistribute it and/or modify
@@ -22,23 +21,33 @@ import math
 import os.path
 import random
 import sys
+import urllib.parse
 
 import cairo
 import gi
-gi.require_version('Gtk', '3.0')  # noqa
-from gi.repository import Gtk, Gdk, GObject
-from six.moves import urllib  # Python 2 backward compatibility
 
 from photocollage import APP_NAME, artwork, collage, render
 from photocollage.render import PIL_SUPPORTED_EXTS as EXTS
 
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GObject, GdkPixbuf  # noqa: E402, I100
 
-gettext.textdomain(APP_NAME)
-_ = gettext.gettext
-_n = gettext.ngettext
-# xgettext --keyword=_n:1,2 -o po/photocollage.pot $(find . -name '*.py')
-# cp po/photocollage.pot po/fr.po
-# msgfmt -o po/fr.mo po/fr.po
+
+gettext.install(APP_NAME, localedir=os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'locale'))
+
+# To extract strings:
+#   xgettext --keyword=_n:1,2 \
+#     -o photocollage/locale/photocollage.pot \
+#     $(find . -name '*.py')
+#   msgmerge -N -U \
+#     photocollage/locale/fr/LC_MESSAGES/photocollage.po \
+#     photocollage/locale/photocollage.pot
+
+# To do before building the package with 'python -m build':
+#   for file in photocollage/locale/*/LC_MESSAGES/photocollage.po; do
+#     msgfmt -o "${file%.po}.mo" "$file"
+#   done
 
 
 def pil_image_to_cairo_surface(src):
@@ -116,7 +125,7 @@ def gtk_run_in_main_thread(fn):
     return my_fn
 
 
-class UserCollage(object):
+class UserCollage:
     """Represents a user-defined collage
 
     A UserCollage contains a list of photos (referenced by filenames) and a
@@ -158,11 +167,11 @@ class PhotoCollageWindow(Gtk.Window):
     TARGET_TYPE_URI = 2
 
     def __init__(self):
-        super(PhotoCollageWindow, self).__init__(title=_("PhotoCollage"))
+        super().__init__(title=_("PhotoCollage"))
         self.history = []
         self.history_index = 0
 
-        class Options(object):
+        class Options:
             def __init__(self):
                 self.border_w = 0.01
                 self.border_c = "black"
@@ -282,14 +291,11 @@ class PhotoCollageWindow(Gtk.Window):
             dialog.destroy()
 
     def choose_images(self, button):
-        dialog = Gtk.FileChooserDialog(_("Choose images"),
-                                       button.get_toplevel(),
-                                       Gtk.FileChooserAction.OPEN,
-                                       select_multiple=True)
-        dialog.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        dialog.add_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
-
-        set_open_image_filters(dialog)
+        dialog = PreviewFileChooserDialog(title=_("Choose images"),
+                                          parent=button.get_toplevel(),
+                                          action=Gtk.FileChooserAction.OPEN,
+                                          select_multiple=True,
+                                          modal=True)
 
         if dialog.run() == Gtk.ResponseType.OK:
             files = dialog.get_filenames()
@@ -335,7 +341,7 @@ class PhotoCollageWindow(Gtk.Window):
             self.btn_save.set_sensitive(True)
 
         def on_fail(exception):
-            dialog = ErrorDialog(self, "%s:\n\n%s" % (
+            dialog = ErrorDialog(self, "{}:\n\n{}".format(
                 _("An error occurred while rendering image:"), exception))
             compdialog.destroy()
             dialog.run()
@@ -420,7 +426,7 @@ class PhotoCollageWindow(Gtk.Window):
             compdialog.destroy()
 
         def on_fail(exception):
-            dialog = ErrorDialog(self, "%s:\n\n%s" % (
+            dialog = ErrorDialog(self, "{}:\n\n{}".format(
                 _("An error occurred while rendering image:"), exception))
             compdialog.destroy()
             dialog.run()
@@ -456,10 +462,10 @@ class PhotoCollageWindow(Gtk.Window):
 
 class ImagePreviewArea(Gtk.DrawingArea):
     """Area to display the poster preview and react to user actions"""
-    INSENSITIVE, FLYING, SWAPPING = range(3)
+    INSENSITIVE, FLYING, SWAPPING_OR_MOVING = range(3)
 
     def __init__(self, parent):
-        super(ImagePreviewArea, self).__init__()
+        super().__init__()
         self.parent = parent
 
         parse, color = Gdk.Color.parse("#888888")
@@ -481,7 +487,7 @@ class ImagePreviewArea(Gtk.DrawingArea):
         self.image = None
         self.mode = self.INSENSITIVE
 
-        class SwapEnd(object):
+        class SwapEnd:
             def __init__(self, cell=None, x=0, y=0):
                 self.cell = cell
                 self.x = x
@@ -493,8 +499,9 @@ class ImagePreviewArea(Gtk.DrawingArea):
 
     def set_collage(self, image, collage):
         self.image = pil_image_to_cairo_surface(image)
-        # The Collage object must be deeply copied. Otherwise, swapping photos
-        # in a new page would also affect the original page (in history).
+        # The Collage object must be deeply copied.
+        # Otherwise, SWAPPING_OR_MOVING photos in a new page would also affect
+        # the original page (in history).
         # The deep copy is done here (not in button_release_event) because
         # references to cells are gathered in other functions, so that making
         # the copy at the end would invalidate these references.
@@ -554,7 +561,7 @@ class ImagePreviewArea(Gtk.DrawingArea):
                 if cell:
                     self.paint_image_border(context, cell)
                     self.paint_image_delete_button(context, cell)
-            elif self.mode == self.SWAPPING:
+            elif self.mode == self.SWAPPING_OR_MOVING:
                 self.paint_image_border(context, self.swap_origin.cell, (3, 3))
                 cell = self.collage.page.get_cell_at_position(self.x, self.y)
                 if cell and cell != self.swap_origin.cell:
@@ -598,19 +605,26 @@ class ImagePreviewArea(Gtk.DrawingArea):
             else:
                 self.swap_origin.x, self.swap_origin.y = x, y
                 self.swap_origin.cell = cell
-                self.mode = self.SWAPPING
+                self.mode = self.SWAPPING_OR_MOVING
         widget.queue_draw()
 
     def button_release_event(self, widget, event):
-        if self.mode == self.SWAPPING:
+        if self.mode == self.SWAPPING_OR_MOVING:
             self.swap_dest.x, self.swap_dest.y = \
                 self.get_pos_in_image(event.x, event.y)
             self.swap_dest.cell = self.collage.page.get_cell_at_position(
                 self.swap_dest.x, self.swap_dest.y)
             if self.swap_dest.cell \
                     and self.swap_origin.cell != self.swap_dest.cell:
+                # different cell: SWAPPING
                 self.collage.page.swap_photos(self.swap_origin.cell,
                                               self.swap_dest.cell)
+                self.parent.render_from_new_collage(self.collage)
+            elif self.swap_dest.cell:
+                # same cell: MOVING
+                move_x = (self.swap_origin.x - self.x) / self.swap_dest.cell.w
+                move_y = (self.swap_origin.y - self.y) / self.swap_dest.cell.h
+                self.swap_dest.cell.photo.move(move_x, move_y)
                 self.parent.render_from_new_collage(self.collage)
             self.mode = self.FLYING
         widget.queue_draw()
@@ -618,7 +632,7 @@ class ImagePreviewArea(Gtk.DrawingArea):
 
 class SettingsDialog(Gtk.Dialog):
     def __init__(self, parent):
-        super(SettingsDialog, self).__init__(
+        super().__init__(
             _("Settings"), parent, 0,
             (Gtk.STOCK_OK, Gtk.ResponseType.OK,
              Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL))
@@ -693,7 +707,8 @@ class SettingsDialog(Gtk.Dialog):
         self.etr_border = Gtk.Entry(text=str(100.0 * parent.opts.border_w))
         self.etr_border.connect("changed", self.validate_float)
         self.etr_border.last_valid_text = self.etr_border.get_text()
-        self.etr_border.set_width_chars(2)
+        self.etr_border.set_width_chars(4)
+        self.etr_border.set_alignment(1.0)
         box.pack_start(self.etr_border, False, False, 0)
         label = Gtk.Label("%", xalign=0)
         box.pack_start(label, False, False, 0)
@@ -736,7 +751,7 @@ class SettingsDialog(Gtk.Dialog):
 class ComputingDialog(Gtk.Dialog):
     """Simple "please wait" dialog, with a "cancel" button"""
     def __init__(self, parent):
-        super(ComputingDialog, self).__init__(
+        super().__init__(
             _("Please wait"), parent, 0, (Gtk.STOCK_CANCEL,
                                           Gtk.ResponseType.CANCEL))
         self.set_default_size(300, -1)
@@ -761,12 +776,50 @@ class ComputingDialog(Gtk.Dialog):
 
 class ErrorDialog(Gtk.Dialog):
     def __init__(self, parent, message):
-        super(ErrorDialog, self).__init__(_("Error"), parent, 0,
-                                          (Gtk.STOCK_OK, Gtk.ResponseType.OK))
+        super().__init__(_("Error"), parent, 0,
+                         (Gtk.STOCK_OK, Gtk.ResponseType.OK))
         self.set_border_width(10)
         box = self.get_content_area()
         box.add(Gtk.Label(message))
         self.show_all()
+
+
+class PreviewFileChooserDialog(Gtk.FileChooserDialog):
+    PREVIEW_MAX_SIZE = 256
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+
+        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+        self.add_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+
+        set_open_image_filters(self)
+
+        self._preview = Gtk.Image()
+        # Don't let preview size down horizontally for skinny images, cause
+        # that looks distracting
+        self._preview.set_size_request(
+            PreviewFileChooserDialog.PREVIEW_MAX_SIZE, -1)
+        self.set_preview_widget(self._preview)
+        self.set_use_preview_label(False)
+        self.connect("update-preview", self.update_preview_cb)
+
+    def update_preview_cb(self, file_chooser):
+        filename = self.get_preview_filename()
+        if filename is None or os.path.isdir(filename):
+            self.set_preview_widget_active(False)
+            return
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(
+                filename,
+                PreviewFileChooserDialog.PREVIEW_MAX_SIZE,
+                PreviewFileChooserDialog.PREVIEW_MAX_SIZE)
+            self._preview.set_from_pixbuf(pixbuf)
+        except Exception as e:
+            print(e)
+            self.set_preview_widget_active(False)
+            return
+        self.set_preview_widget_active(True)
 
 
 def main():

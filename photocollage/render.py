@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (C) 2014 Adrien Vergé
 #
 # This program is free software; you can redistribute it and/or modify
@@ -21,6 +20,7 @@ import time
 
 import PIL.Image
 import PIL.ImageDraw
+import PIL.ImageFile
 
 from photocollage.collage import Photo
 
@@ -30,7 +30,12 @@ QUALITY_FAST = 1
 QUALITY_BEST = 2
 
 
-class PIL_SUPPORTED_EXTS(object):
+# Try to continue even if the input file is corrupted.
+# See issue at https://github.com/adrienverge/PhotoCollage/issues/65
+PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+
+class PIL_SUPPORTED_EXTS:
     """File extensions supported by PIL
 
     Compiled from:
@@ -94,7 +99,7 @@ def build_photolist(filelist):
     for name in filelist:
         try:
             img = PIL.Image.open(name)
-        except IOError:
+        except OSError:
             raise BadPhoto(name)
         w, h = img.size
 
@@ -105,7 +110,7 @@ def build_photolist(filelist):
                 orientation = exif[274]
                 if orientation == 6 or orientation == 8:
                     w, h = h, w
-        except:
+        except Exception:
             pass
 
         ret.append(Photo(name, w, h, orientation))
@@ -126,7 +131,7 @@ class RenderingTask(Thread):
     def __init__(self, page, border_width=0.01, border_color=(0, 0, 0),
                  quality=QUALITY_FAST, output_file=None,
                  on_update=None, on_complete=None, on_fail=None):
-        super(RenderingTask, self).__init__()
+        super().__init__()
 
         self.page = page
         self.border_width = border_width
@@ -235,13 +240,23 @@ class RenderingTask(Thread):
             cache[cell.photo.filename] = img
 
         if shape > 0:  # image is too thick
-            img = img.crop(
-                (int(round((img.size[0] - cell.w) / 2)), 0,
-                 int(round((img.size[0] + cell.w) / 2)), int(round(cell.h))))
+            width_to_crop = img.size[0] - cell.w
+            img = img.crop((
+                int(round(width_to_crop * cell.photo.offset_w)),
+                0,
+                int(round(img.size[0] - width_to_crop *
+                    (1 - cell.photo.offset_w))),
+                int(round(cell.h))
+            ))
         elif shape < 0:  # image is too tall
-            img = img.crop(
-                (0, int(round((img.size[1] - cell.h) / 2)),
-                 int(round(cell.w)), int(round((img.size[1] + cell.h) / 2))))
+            height_to_crop = img.size[1] - cell.h
+            img = img.crop((
+                0,
+                int(round(height_to_crop * cell.photo.offset_h)),
+                int(round(cell.w)),
+                int(round(img.size[1] - height_to_crop *
+                    (1 - cell.photo.offset_h)))
+            ))
 
         return img
 

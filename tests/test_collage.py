@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (C) 2014 Adrien Vergé
 #
 # This program is free software; you can redistribute it and/or modify
@@ -220,6 +219,7 @@ class TestCollage(unittest.TestCase):
                   "[10 10] [20 10-- ------]\n"
                   "        [20 10-- ------]")
         self.assertEqual(repr(page), wanted)
+
 
 if __name__ == '__main__':
     unittest.main()
